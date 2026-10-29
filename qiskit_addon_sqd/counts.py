@@ -184,7 +184,17 @@ def normalize_counts_dict(counts: Mapping[str, float | int]) -> Mapping[str, flo
 
 
 def bitstring_matrix_to_integers(bitstring_matrix: np.ndarray) -> np.ndarray:
-    """Convert a bitstring matrix to an array of integers."""
+    """Convert a bitstring matrix to an array of integers.
+
+    Each row becomes one integer, with column 0 as the most significant bit.
+    Bitstrings narrower than 64 bits convert to ``numpy`` ``int64``. From 64 bits on,
+    the result is an object array of Python ints, whose arbitrary precision keeps the
+    conversion exact at any width.
+
+    Consumers need not accept that range. In particular, an ``sci_solver`` passed to
+    :func:`~qiskit_addon_sqd.fermion.diagonalize_fermionic_hamiltonian` may impose an
+    orbital ceiling.
+    """
     n_bitstrings, n_bits = bitstring_matrix.shape
 
     if n_bits < 64:
