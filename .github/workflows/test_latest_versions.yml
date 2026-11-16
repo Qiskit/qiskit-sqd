@@ -100,8 +100,8 @@ jobs:
         # package itself, which is what makes the split above stick.
         run: >-
           extremal-python-dependencies pin-dependencies --inplace
-          "fulqrum @ file:$(echo macos-wheels/fulqrum-*.whl)"
-          "sbd-eigensolver @ file:$(echo macos-wheels/sbd_eigensolver-*.whl)"
+          "fulqrum @ file:$PWD/$(echo macos-wheels/fulqrum-*.whl)"
+          "sbd-eigensolver @ file:$PWD/$(echo macos-wheels/sbd_eigensolver-*.whl)"
       # Cap the SQD subspace dimension in the Fulqrum guide for CI execution only.
       # The committed notebook (and the docs site) stay unbounded; this edits the
       # working-tree copy so tox -e notebook fits in the runner's memory.

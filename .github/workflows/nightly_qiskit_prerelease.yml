@@ -118,8 +118,8 @@ jobs:
         shell: bash
         run: >-
           extremal-python-dependencies pin-dependencies --inplace
-          "fulqrum @ file:$(echo macos-wheels/fulqrum-*.whl)"
-          "sbd-eigensolver @ file:$(echo macos-wheels/sbd_eigensolver-*.whl)"
+          "fulqrum @ file:$PWD/$(echo macos-wheels/fulqrum-*.whl)"
+          "sbd-eigensolver @ file:$PWD/$(echo macos-wheels/sbd_eigensolver-*.whl)"
       # An exact `==` pin naming a pre-release opts that one package in, so pip
       # installs the rc wheel while every other dependency still resolves to a
       # final release. `--pre` would admit pre-releases of everything.
