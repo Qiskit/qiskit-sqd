@@ -124,18 +124,21 @@ jobs:
           "qiskit @ file:$PWD/$(echo qiskit/dist/*.whl)"
           "qiskit-ibm-runtime @ file:$PWD/$(echo qiskit-ibm-runtime/dist/*.whl)"
           "qiskit-addon-utils @ file:$PWD/$(echo qiskit-addon-utils/dist/*.whl)"
-      # The scientific-python nightly channel already publishes scipy, so
-      # it is downloaded rather than built.
-      #
-      # Its wheels start at cp312, so the 3.11 leg has nothing to download
-      # and keeps testing against a released scipy.
+      # scipy 2.0 requires Python 3.12, so the 3.11 leg has no wheel.
+      # The channel is slow, and a read timeout surfaces as "No matching
+      # distribution found" rather than as a timeout.
       - name: Pin scipy pre-release
         if: matrix.python-version != '3.11'
         shell: bash
         run: |
-          pip download --no-deps --pre -d scipy-prerelease \
+          if ! pip download --no-deps --pre -d scipy-prerelease \
+            --timeout 60 \
             -i https://pypi.anaconda.org/scientific-python-nightly-wheels/simple \
             scipy
+          then
+            echo "::warning::Could not download the scipy pre-release; testing against the released scipy instead."
+            exit 0
+          fi
           extremal-python-dependencies pin-dependencies --inplace \
             "scipy @ file:$PWD/$(echo scipy-prerelease/*.whl)"
       # Cap the SQD subspace dimension in the Fulqrum guide for CI execution only.
