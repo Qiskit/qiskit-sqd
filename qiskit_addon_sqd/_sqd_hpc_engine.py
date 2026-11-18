@@ -34,7 +34,6 @@ pure-Python default.
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Sequence
 
 import numpy as np
@@ -75,16 +74,6 @@ def recover_configurations(
     numpy layout differs, so we permute columns on the way in and back out.
     """
     rng = np.random.default_rng(rand_seed)
-
-    occ_dims = len(np.array(avg_occupancies).shape)
-    if occ_dims == 1:
-        warnings.warn(
-            "Passing avg_occupancies as a 1D array is deprecated. Pass a length-2 tuple containing the spin-up and spin-down occupancies respectively.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        norb = bitstring_matrix.shape[1] // 2
-        avg_occupancies = (np.flip(avg_occupancies[norb:]), np.flip(avg_occupancies[:norb]))
 
     if num_elec_a < 0 or num_elec_b < 0:
         raise ValueError("The numbers of electrons must be specified as non-negative integers.")

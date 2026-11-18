@@ -15,43 +15,63 @@ on:
 jobs:
   tests:
     name: development version tests (${{ matrix.os }}, ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ matrix.os }}
+    # Building five development wheels before the test run leaves this job
+    # sensitive to runner speed: the same content has taken anywhere from
+    # 24 to over 30 minutes, so 30 was not a reliable ceiling. At 30 the job
+    # was cancelled mid-notebook-run, after the unit tests had already passed.
+    # 60 was then lost to the apt step below. For of order one run in ten, the
+    # Azure Ubuntu mirror serving the runner's region is degraded, and the step
+    # costs an extra half hour. apt keeps receiving data the whole time, some
+    # three orders of magnitude below the usual rate, so no timeout setting
+    # helps; the only lever is headroom.
+    timeout-minutes: 90
     strategy:
+      # One failing cell should not hide the state of the rest.
+      fail-fast: false
       max-parallel: 4
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.11", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Upgrade pip
         run: |
           python -m pip install --upgrade pip
-      # BLAS/LAPACK and OpenMP needed to build fulqrum for notebook testing
-      - name: Install BLAS/LAPACK (Linux)
+      # BLAS/LAPACK and OpenMP are needed to build fulqrum, and MPI and BLAS to
+      # build sbd-eigensolver, for notebook testing.
+      #
+      # --no-install-recommends drops a dozen packages nothing here uses. The
+      # ROCm and OpenCL libraries that dominate the download stay regardless,
+      # being hard dependencies of libopenmpi40.
+      - name: Install BLAS/LAPACK and MPI (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libblas-dev liblapack-dev
-      - name: Bootstrap OpenMP-capable compiler (macOS)
+          sudo apt-get install -y --no-install-recommends libblas-dev liblapack-dev libopenblas-dev libopenmpi-dev openmpi-bin
+      - name: Install OpenMP and BLAS (macOS)
         if: runner.os == 'macOS'
         shell: bash
+        # No CC/CXX exported here on purpose. Only fulqrum needs a non-Apple
+        # compiler, and it gets one in its own build step below; pinning Homebrew
+        # LLVM for the whole job breaks sbd-eigensolver, which links OpenBLAS.
+        # Homebrew's openblas depends on the standalone libomp formula and loads
+        # that copy at run time, so building sbd against a compiler carrying its
+        # own libomp puts two same-named runtimes in one process and aborts at the
+        # first parallel region -- Qiskit/sbd-eigensolver-python#27. Apple clang
+        # takes its OpenMP from the same libomp formula OpenBLAS uses, so left
+        # alone the two agree.
         run: |
-          brew install llvm libomp
-          LLVM_PREFIX="$(brew --prefix llvm)"
-          OMP_PREFIX="$(brew --prefix libomp)"
-          {
-            echo "CC=${LLVM_PREFIX}/bin/clang"
-            echo "CXX=${LLVM_PREFIX}/bin/clang++"
-            echo "LDFLAGS=-L${LLVM_PREFIX}/lib -L${OMP_PREFIX}/lib -Wl,-rpath,${LLVM_PREFIX}/lib"
-            echo "CPPFLAGS=-I${LLVM_PREFIX}/include -I${OMP_PREFIX}/include"
-          } >> "$GITHUB_ENV"
+          brew install llvm libomp open-mpi openblas
       - name: Install tools from pypi
         run: |
           python -m pip install tox build 'extremal-python-dependencies<2'
@@ -62,9 +82,27 @@ jobs:
           git rev-parse HEAD
           python -m build --wheel
       - name: Build fulqrum development wheel
+        shell: bash
+        # fulqrum passes a bare `-fopenmp`, which Apple clang rejects, so this
+        # build -- and only this build -- uses Homebrew LLVM. Scoped to the step
+        # rather than written to GITHUB_ENV so it does not follow the other builds.
         run: |
-          git clone --recurse-submodules https://github.com/qiskit-community/fulqrum
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            LLVM_PREFIX="$(brew --prefix llvm)"
+            OMP_PREFIX="$(brew --prefix libomp)"
+            export CC="${LLVM_PREFIX}/bin/clang"
+            export CXX="${LLVM_PREFIX}/bin/clang++"
+            export LDFLAGS="-L${LLVM_PREFIX}/lib -L${OMP_PREFIX}/lib -Wl,-rpath,${LLVM_PREFIX}/lib"
+            export CPPFLAGS="-I${LLVM_PREFIX}/include -I${OMP_PREFIX}/include"
+          fi
+          git clone --recurse-submodules https://github.com/Qiskit/fulqrum
           cd fulqrum
+          git rev-parse HEAD
+          python -m build --wheel
+      - name: Build sbd-eigensolver development wheel
+        run: |
+          git clone --recurse-submodules https://github.com/Qiskit/sbd-eigensolver-python
+          cd sbd-eigensolver-python
           git rev-parse HEAD
           python -m build --wheel
       - name: Build Qiskit SDK development wheel
@@ -89,10 +127,28 @@ jobs:
         shell: bash
         run: >-
           extremal-python-dependencies pin-dependencies --inplace
-          "fulqrum @ file:$(echo fulqrum/dist/*.whl)"
-          "qiskit @ file:$(echo qiskit/dist/*.whl)"
-          "qiskit-ibm-runtime @ file:$(echo qiskit-ibm-runtime/dist/*.whl)"
-          "qiskit-addon-utils @ file:$(echo qiskit-addon-utils/dist/*.whl)"
+          "fulqrum @ file:$PWD/$(echo fulqrum/dist/*.whl)"
+          "sbd-eigensolver @ file:$PWD/$(echo sbd-eigensolver-python/dist/*.whl)"
+          "qiskit @ file:$PWD/$(echo qiskit/dist/*.whl)"
+          "qiskit-ibm-runtime @ file:$PWD/$(echo qiskit-ibm-runtime/dist/*.whl)"
+          "qiskit-addon-utils @ file:$PWD/$(echo qiskit-addon-utils/dist/*.whl)"
+      # scipy 2.0 requires Python 3.12, so the 3.11 leg has no wheel.
+      # The channel is slow, and a read timeout surfaces as "No matching
+      # distribution found" rather than as a timeout.
+      - name: Pin scipy pre-release
+        if: matrix.python-version != '3.11'
+        shell: bash
+        run: |
+          if ! pip download --no-deps --pre -d scipy-prerelease \
+            --timeout 60 \
+            -i https://pypi.anaconda.org/scientific-python-nightly-wheels/simple \
+            scipy
+          then
+            echo "::warning::Could not download the scipy pre-release; testing against the released scipy instead."
+            exit 0
+          fi
+          extremal-python-dependencies pin-dependencies --inplace \
+            "scipy @ file:$PWD/$(echo scipy-prerelease/*.whl)"
       # Cap the SQD subspace dimension in the Fulqrum guide for CI execution only.
       # The committed notebook (and the docs site) stay unbounded; this edits the
       # working-tree copy so tox -e notebook fits in the runner's memory.

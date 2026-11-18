@@ -15,6 +15,9 @@
 # we should set up its RST file.
 """Primary SQD functionality."""
 
+import contextlib
+from importlib.metadata import PackageNotFoundError, version
+
 # Importing a module that has ``@_acceleration_candidate`` decorators is what
 # registers its candidates with the domain, so ``configuration_recovery`` is
 # imported for that side effect and not for a name.  Such a module must not
@@ -23,6 +26,10 @@
 # package back, which would make the import graph cyclic.)
 from . import configuration_recovery  # noqa: F401
 from ._coheriq_domain import _domain
+
+# Leaves __version__ unbound when running from an uninstalled source tree.
+with contextlib.suppress(PackageNotFoundError):
+    __version__ = version("qiskit-addon-sqd")
 
 # Registration is only possible while the domain is under construction, so this
 # has to come after every import above.

@@ -14,7 +14,7 @@ backend-path = ["tools"]
 
 [project]
 name = "qiskit-addon-sqd"
-version = "0.13.0"
+version = "0.14.0"
 readme = "README.md"
 description = "Classically postprocess noisy quantum samples to yield more accurate energy estimations"
 license = "Apache-2.0"
@@ -23,8 +23,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Natural Language :: English",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -32,12 +33,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dependencies = [
     "qiskit>=2.0, <3",
     "numpy>=2.0",
-    "pyscf>=2.9; sys_platform != 'win32'",
+    "pyscf>=2.15",
     "jaxlib>=0.4.30",
     "jax>=0.4.30",
     "scipy>=1.14.1",
@@ -46,12 +47,15 @@ dependencies = [
 
 [project.optional-dependencies]
 fulqrum = [
-    "fulqrum>=0.4.4",
+    "fulqrum>=0.5.0",
     "primme>=3.2.3",
+]
+sbd = [
+    "sbd-eigensolver>=1.6.1",
 ]
 dev = [
     "qiskit-addon-sqd[test,nbtest,lint,docs]",
-    "tox>=4.11.4",
+    "tox>=4.21.2",
 ]
 basetest = [
     "pytest>=8.0",
@@ -65,18 +69,19 @@ nbtest = [
     "nbmake>=1.5.0",
 ]
 style = [
-    "ruff==0.16.5",
+    "ruff==0.17.3",
     "nbqa>=1.8.5",
 ]
 lint = [
     "qiskit-addon-sqd[style]",
-    "mypy==2.3.1",
-    "pylint==4.0.8",
+    "mypy==2.4.1",
+    "pylint==4.1.3",
     "reno>=4.1",
     "toml>=0.9.6",
 ]
 notebook-dependencies = [
     "qiskit-addon-sqd[fulqrum]",
+    "qiskit-addon-sqd[sbd]",
     "qiskit-addon-utils",
     "qiskit-aer",
     "matplotlib",
@@ -162,9 +167,9 @@ sdist.include = [
 ]
 
 [tool.cibuildwheel]
-# Build binary wheels for the supported CPython versions.  Windows is
-# intentionally excluded for now (see release.yml), and PyPy is not targeted.
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+# Build binary wheels for the supported CPython versions.  PyPy is not targeted,
+# and 32-bit targets are skipped.
+build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-win32 pp* *_i686"
 build-frontend = "build"
 # Smoke-test each built wheel: confirm the compiled extension is present and
@@ -178,14 +183,16 @@ test-command = "python {project}/test/smoke_test_accel.py"
 archs = ["native"]
 
 [tool.mypy]
-python_version = "3.10"
+# Deliberately ahead of requires-python.  numpy's stubs use PEP 695 "type"
+# statements, which mypy rejects unless it is analyzing as 3.12 or later.
+python_version = "3.12"
 show_error_codes = true
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
 [tool.pylint]
-py-version = "3.10"
+py-version = "3.11"
 load-plugins = ["pylint.extensions.no_self_use"]
 
 [tool.pylint."messages control"]
