@@ -11,7 +11,8 @@ features:
 upgrade:
   - |
     Binary wheels are now published for Linux (x86_64 and aarch64, both
-    ``manylinux`` and ``musllinux``) and macOS (arm64 and x86_64), in addition
-    to a universal pure-Python ``py3-none-any`` wheel. ``pip`` automatically
-    selects the most specific wheel for your platform, falling back to the
-    universal wheel or a source build where no binary wheel is available.
+    ``manylinux`` and ``musllinux``), macOS (arm64 and x86_64) and Windows
+    (x86_64), in addition to a universal pure-Python ``py3-none-any`` wheel.
+    ``pip`` automatically selects the most specific wheel for your platform,
+    falling back to the universal wheel or a source build where no binary wheel
+    is available.
