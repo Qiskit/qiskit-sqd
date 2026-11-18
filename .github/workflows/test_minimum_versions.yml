@@ -19,13 +19,13 @@ jobs:
       max-parallel: 4
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10"]
+        python-version: ["3.11"]
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies (minimum versions)
@@ -35,17 +35,18 @@ jobs:
           python -m pip install 'extremal-python-dependencies<2'
           pip install "tox==$(extremal-python-dependencies get-tox-minversion)"
           extremal-python-dependencies pin-dependencies-to-minimum --inplace
-      # BLAS/LAPACK and OpenMP needed to build fulqrum for notebook testing
-      - name: Install BLAS/LAPACK (Linux)
+      # BLAS/LAPACK and OpenMP are needed to build fulqrum, and MPI and BLAS to
+      # build sbd-eigensolver, for notebook testing
+      - name: Install BLAS/LAPACK and MPI (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libblas-dev liblapack-dev
+          sudo apt-get install -y --no-install-recommends libblas-dev liblapack-dev libopenblas-dev libopenmpi-dev openmpi-bin
       - name: Bootstrap OpenMP-capable compiler (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install llvm libomp
+          brew install llvm libomp open-mpi openblas
           LLVM_PREFIX="$(brew --prefix llvm)"
           OMP_PREFIX="$(brew --prefix libomp)"
           {
