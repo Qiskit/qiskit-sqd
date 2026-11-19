@@ -16,7 +16,10 @@ import unittest
 
 import numpy as np
 import pytest
-from qiskit_addon_sqd.configuration_recovery import recover_configurations
+from qiskit_addon_sqd.configuration_recovery import (
+    recover_configurations,
+    recover_configurations_single_species,
+)
 
 
 class TestConfigurationRecovery(unittest.TestCase):
@@ -98,4 +101,63 @@ class TestConfigurationRecovery(unittest.TestCase):
             assert (
                 e_info.value.args[0]
                 == "The numbers of electrons must be specified as non-negative integers."
+            )
+
+    def test_recover_configurations_single_species(self):
+        with self.subTest("Only the total Hamming weight if conserved"):
+            num_elec = 2
+            bs_mat = np.array([[False, False, True, True]])
+            probs = np.array([1.0])
+            occs = np.array([0.5, 0.5, 0.5, 0.5])
+            mat_rec, probs_rec = recover_configurations_single_species(
+                bs_mat, probs, occs, num_elec, rand_seed=4224
+            )
+            self.assertTrue((mat_rec == bs_mat).all())
+            self.assertTrue((probs_rec == np.array([1.0])).all())
+        with self.subTest("Basic test. Zeroes to ones."):
+            num_elec = 1
+            bs_mat = np.array([[False, False, False, False]])
+            expected_mat = np.array([[False, True, False, False]])
+            probs = np.array([1.0])
+            occs = np.array([0.0, 0.0, 1.0, 0.0])
+            mat_rec, probs_rec = recover_configurations_single_species(
+                bs_mat, probs, occs, num_elec, rand_seed=4224
+            )
+            self.assertTrue((mat_rec == expected_mat).all())
+            self.assertTrue(probs_rec == np.array([1.0]).all())
+        with self.subTest("Basic test. Ones to zeroes."):
+            num_elec = 3
+            bs_mat = np.array([[True, True, True, True]])
+            expected_mat = np.array([[True, False, True, True]])
+            probs = np.array([1.0])
+            occs = np.array([1.0, 1.0, 0.0, 1.0])
+            mat_rec, probs_rec = recover_configurations_single_species(
+                bs_mat, probs, occs, num_elec, rand_seed=4224
+            )
+            self.assertTrue((mat_rec == expected_mat).all())
+            self.assertTrue((probs_rec == np.array([1.0])).all())
+        with self.subTest("Test with more than 72 bits. Ones to zeros."):
+            n_bits = 74
+            rng = np.random.default_rng(554)
+            bs_mat = rng.integers(2, size=(1, n_bits), dtype=bool)
+            probs = np.array([1.0])
+            occs = np.zeros(n_bits)
+            num_elec = 0
+            expected_mat = np.zeros((1, n_bits), dtype=bool)
+            expected_probs = np.array([1.0])
+            mat_rec, probs_rec = recover_configurations_single_species(
+                bs_mat, probs, occs, num_elec, rand_seed=4224
+            )
+            self.assertTrue((expected_mat == mat_rec).all())
+            self.assertTrue((expected_probs == probs_rec).all())
+        with self.subTest("Bad hamming."):
+            bs_mat = np.array([[True, True]])
+            probs = np.array([1.0])
+            occs = np.array([0.0, 0.0])
+            num_elec = -1
+            with pytest.raises(ValueError) as e_info:
+                recover_configurations_single_species(bs_mat, probs, occs, num_elec, rand_seed=4224)
+            assert (
+                e_info.value.args[0]
+                == "The numbers of electrons must be specified as a non-negative integer."
             )
