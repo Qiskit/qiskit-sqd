@@ -517,8 +517,8 @@ def diagonalize_fermionic_hamiltonian(
               amplitudes back to determinants. Each CI string is a bitmask over the
               spatial orbitals of one spin species: ``numpy`` ``int64`` below 64
               orbitals, and an object array of Python ints from 64 on, where a string
-              no longer fits a signed 64-bit integer. A solver that reinterprets these
-              as fixed-width integers imposes an orbital ceiling, which this function
+              no longer fits a signed 64-bit integer. A solver that narrows these back
+              to fixed-width integers imposes an orbital ceiling, which this function
               does not check. See the note on solver width limits below.
             - One-body tensor of the Hamiltonian.
             - Two-body tensor of the Hamiltonian.
@@ -677,11 +677,14 @@ def diagonalize_fermionic_hamiltonian(
         ``sci_solver`` in use. This function imposes no ceiling of its own, since it
         handles the CI strings at any width.
 
-        Solvers reach their limits differently. The default ``sci_solver`` raises:
-        PySCF packs a CI string into a signed 64-bit integer, so it raises
-        :exc:`NotImplementedError` from 64 orbitals on. Others abort the process, and
-        others have no hard limit but fall back to a slower path, where the only
-        symptom is that the run slows down.
+        Solvers reach their limits differently, and the default one is not the clean
+        case. PySCF carries CI strings in signed 64-bit integers, so a string with bit
+        63 set raises :exc:`OverflowError`. What binds is the highest occupied orbital
+        index, not the number of orbitals: a wide system whose electrons all sit below
+        orbital 63 diagonalizes normally. Exactly 64 orbitals fails earlier and for an
+        unrelated reason, with a :exc:`TypeError` from a dtype promotion inside PySCF.
+        Other solvers abort the process, and others have no hard limit but fall back to
+        a slower path, where the only symptom is that the run slows down.
 
         A ceiling may sit in a solver's Python layer or in the engine behind it, and
         an engine's is often a compile-time constant that differs between builds. For
@@ -1283,9 +1286,10 @@ def solve_sci_batch(
             energy rather than an error.
         one_body_tensor: The one-body tensor of the Hamiltonian.
         two_body_tensor: The two-body tensor of the Hamiltonian.
-        norb: The number of spatial orbitals. PySCF packs a CI string into a signed
-            64-bit integer, so it raises :exc:`NotImplementedError` from 64 orbitals
-            on. Wider systems need a different ``sci_solver``.
+        norb: The number of spatial orbitals. PySCF carries CI strings in signed
+            64-bit integers, so a string with bit 63 set raises :exc:`OverflowError`,
+            and exactly 64 orbitals raises :exc:`TypeError`. Systems that occupy
+            orbital 63 or above need a different solver.
         nelec: The numbers of alpha and beta electrons.
         spin_sq: Target value for the total spin squared for the ground state.
             If ``None``, no spin will be imposed.
@@ -1329,9 +1333,10 @@ def solve_sci(
             error.
         one_body_tensor: The one-body tensor of the Hamiltonian.
         two_body_tensor: The two-body tensor of the Hamiltonian.
-        norb: The number of spatial orbitals. PySCF packs a CI string into a signed
-            64-bit integer, so it raises :exc:`NotImplementedError` from 64 orbitals
-            on. Wider systems need a different ``sci_solver``.
+        norb: The number of spatial orbitals. PySCF carries CI strings in signed
+            64-bit integers, so a string with bit 63 set raises :exc:`OverflowError`,
+            and exactly 64 orbitals raises :exc:`TypeError`. Systems that occupy
+            orbital 63 or above need a different solver.
         nelec: The numbers of alpha and beta electrons.
         spin_sq: Target value for the total spin squared for the ground state.
             If ``None``, no spin will be imposed.

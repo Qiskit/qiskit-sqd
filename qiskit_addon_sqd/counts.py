@@ -192,8 +192,8 @@ def bitstring_matrix_to_integers(bitstring_matrix: np.ndarray) -> np.ndarray:
     conversion exact at any width.
 
     Consumers need not accept that range. In particular, an ``sci_solver`` passed to
-    :func:`~qiskit_addon_sqd.fermion.diagonalize_fermionic_hamiltonian` may impose an
-    orbital ceiling.
+    :func:`~qiskit_addon_sqd.fermion.diagonalize_fermionic_hamiltonian` may narrow
+    these integers back to a fixed width, which imposes an orbital ceiling.
     """
     n_bitstrings, n_bits = bitstring_matrix.shape
 
