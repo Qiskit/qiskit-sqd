@@ -38,7 +38,7 @@ from scipy import linalg as LA
 
 from .configuration_recovery import recover_configurations
 from .counts import bit_array_to_arrays, bitstring_matrix_to_integers
-from .processes import broadcast, is_control_process
+from .processes import is_control_process, run_on_control_process
 from .subsampling import postselect_by_hamming_right_and_left, subsample
 
 config.update("jax_enable_x64", True)  # To deal with large integers
@@ -751,6 +751,27 @@ def diagonalize_fermionic_hamiltonian(
         rng=rng,
     )
 
+    # Reject a bit array with no usable samples here, on every process, rather than
+    # inside the loop on the control process alone. The check depends only on the
+    # arguments, which every process has, so raising it natively gives every process
+    # the same exception with its own traceback -- and keeps `except ValueError` behaving
+    # as it does serially, which a broadcast of the exception cannot guarantee. Only the
+    # first iteration postselects; later ones recover from occupancies and can draw on
+    # samples this check would reject.
+    if initial_occupancies is None:
+        postselected, _ = postselect_by_hamming_right_and_left(
+            raw_bitstrings,
+            raw_probs,
+            hamming_right=n_alpha,
+            hamming_left=n_beta,
+        )
+        if not postselected.size:
+            raise ValueError(
+                "The input bit array did not contain any valid bitstrings. "
+                "Either pass a bit array that contains at least one valid bitstring "
+                "(with the correct right and left Hamming weights), or specify a value for initial_occupancies."
+            )
+
     # Run configuration recovery loop
     #
     # In distributed (SPMD) mode, the control process orchestrates the loop and
@@ -759,9 +780,17 @@ def diagonalize_fermionic_hamiltonian(
     for iteration in range(max_iterations):
         # Ask the policy for the subspaces to diagonalize, and enforce the caller's
         # constraints on their shape. The policy has no distributed implementation, so
-        # only the control process runs it; the result is then broadcast to all ranks for
-        # the MPI collective operations in sci_solver.
-        if is_control_process():
+        # only the control process runs it; the result reaches all ranks for the MPI
+        # collective operations in sci_solver.
+        #
+        # The loop-varying values are bound as defaults rather than captured, so that
+        # the body cannot read a later iteration's value.
+        def _prepare_subspaces(
+            current_occupancies: tuple[np.ndarray, np.ndarray] | None = current_occupancies,
+            carryover_strings_a: np.ndarray = carryover_strings_a,
+            carryover_strings_b: np.ndarray = carryover_strings_b,
+            iteration: int = iteration,
+        ) -> list[tuple[np.ndarray, np.ndarray]]:
             bitstrings, probs = _recover_or_postselect(config, current_occupancies)
             request = SubspaceRequest(
                 bitstrings=bitstrings,
@@ -776,13 +805,12 @@ def diagonalize_fermionic_hamiltonian(
                 iteration=iteration,
                 symmetrize_spin=symmetrize_spin,
             )
-            ci_strings = [
+            return [
                 _apply_shape_constraints(config, strs_a, strs_b)
                 for strs_a, strs_b in policy.prepare_subspaces(request)
             ]
-        else:
-            ci_strings = None
-        ci_strings = broadcast(ci_strings, root=0)
+
+        ci_strings = run_on_control_process(_prepare_subspaces)
 
         # Run the diagonalizations, one round at a time. Every process enters this loop
         # and must agree on how many times, because sci_solver is collective. Only the
@@ -791,16 +819,18 @@ def diagonalize_fermionic_hamiltonian(
         # locally would let one rank enter a collective the others had left.
         for round_index in range(_MAX_ROUNDS):
             results = sci_solver(ci_strings, one_body_tensor, two_body_tensor, norb, nelec)
-            if is_control_process():
+
+            def _refine(
+                results: list[SCIResult] = results, round_index: int = round_index
+            ) -> list[tuple[np.ndarray, np.ndarray]] | None:
                 refined = policy.refine(results, round_index)
-                if refined is not None:
-                    refined = [
-                        _apply_shape_constraints(config, strs_a, strs_b)
-                        for strs_a, strs_b in refined
-                    ]
-            else:
-                refined = None
-            refined = broadcast(refined, root=0)
+                if refined is None:
+                    return None
+                return [
+                    _apply_shape_constraints(config, strs_a, strs_b) for strs_a, strs_b in refined
+                ]
+
+            refined = run_on_control_process(_refine)
             if refined is None:
                 break
             ci_strings = refined
@@ -818,9 +848,14 @@ def diagonalize_fermionic_hamiltonian(
 
         # Process results: update best result, check convergence, compute
         # carryover. This has no distributed implementation, so only the control
-        # process performs it; the resulting state is then broadcast to all ranks.
-        if is_control_process():
-            state = _process_sci_results(
+        # process performs it; the resulting state reaches all ranks.
+        def _process_results(
+            results: list[SCIResult] = results,
+            best_result: SCIResult | None = best_result,
+            current_result: SCIResult | None = current_result,
+            current_occupancies: tuple[np.ndarray, np.ndarray] | None = current_occupancies,
+        ) -> _IterationState:
+            return _process_sci_results(
                 config,
                 policy,
                 results,
@@ -828,9 +863,8 @@ def diagonalize_fermionic_hamiltonian(
                 current_result,
                 current_occupancies,
             )
-        else:
-            state = None
-        state = broadcast(state, root=0)
+
+        state = run_on_control_process(_process_results)
 
         best_result = state.best_result
         if state.converged:
