@@ -116,6 +116,9 @@ jobs:
       # Windows runs the unit tests only. The notebooks need fulqrum and
       # sbd-eigensolver, which publish no Windows wheels and build only against
       # the BLAS, OpenMP and MPI installed above for Linux and macOS.
+      # The mpi environment runs the collective tests under `mpirun -n 2`. It is
+      # Linux- and macOS-only: Windows has no MPI installed above, and mpi4py
+      # publishes no wheel that would work without one.
       - name: Test using tox environment
         shell: bash
         env:
@@ -124,5 +127,5 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             tox -e py
           else
-            tox -e py,notebook
+            tox -e py,notebook,mpi
           fi

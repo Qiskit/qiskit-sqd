@@ -56,6 +56,13 @@ basetest = [
 test = [
     "qiskit-addon-sqd[basetest]",
 ]
+# Separate from "test" because the MPI tests need a working MPI installation and
+# mpi4py wheels built against it, which the Windows CI jobs do not have.
+mpitest = [
+    "qiskit-addon-sqd[basetest]",
+    "pytest-mpi>=0.6",
+    "mpi4py>=4.0",
+]
 nbtest = [
     "qiskit-addon-sqd[basetest]",
     "nbmake>=1.5.0",
@@ -136,6 +143,9 @@ enable = [
 
 [tool.pytest.ini_options]
 testpaths = ["./qiskit_addon_sqd/", "./test/"]
+markers = [
+    "mpi: a test that must run under an MPI launcher (selected by `tox -e mpi`).",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,15 @@
+---
+fixes:
+  - |
+    Under MPI, an exception raised by a step of
+    :func:`~qiskit_addon_sqd.fermion.diagonalize_fermionic_hamiltonian` that only the
+    control process performs is now raised on every process.  Previously it was raised
+    on the control process alone, leaving the others waiting in a broadcast that never
+    came.  A program with no later collective operation hung; one with a later
+    collective had its stranded processes consume that operation's broadcast instead,
+    so a call that should have raised returned a result computed from different inputs.
+
+    An exception that cannot be sent to the other processes, such as one whose class
+    cannot be reconstructed by ``pickle``, now aborts the job rather than being
+    approximated, so that a caller's ``except`` clause never runs on some processes
+    and not others.
