@@ -29,7 +29,7 @@ def recover_configurations(
     num_elec_b: int,
     rand_seed: np.random.Generator | int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Refine bitstrings based on average orbital occupancy and a target hamming weight.
+    """Refine bitstrings based on average orbital occupancy and a target hamming weight for each spin species.
 
     This function refines each bit in isolation in an attempt to transform the Hilbert space
     represented by the input ``bitstring_matrix`` into a space closer to that which supports
@@ -67,11 +67,62 @@ def recover_configurations(
     corrected_dict: defaultdict[str, float] = defaultdict(float)
     occs_array = np.flip(avg_occupancies).flatten()
     for bitstring, freq in zip(bitstring_matrix, probabilities):
-        bs_corrected = _bipartite_bitstring_correcting(
+        bs_corrected = _bitstring_correcting(
             bitstring,
             occs_array,
-            num_elec_a,
-            num_elec_b,
+            [num_elec_b, num_elec_a],
+            rng=rng,
+        )
+        bs_str = "".join("1" if bit else "0" for bit in bs_corrected)
+        corrected_dict[bs_str] += freq
+    bs_mat_out = np.array([[bit == "1" for bit in bs] for bs in corrected_dict])
+    freqs_out = np.array([f for f in corrected_dict.values()])
+    freqs_out = np.abs(freqs_out) / np.sum(np.abs(freqs_out))
+
+    return bs_mat_out, freqs_out
+
+
+def recover_configurations_single_species(
+    bitstring_matrix: np.ndarray,
+    probabilities: Sequence[float] | np.ndarray,
+    avg_occupancies: np.ndarray,
+    num_elec: int,
+    rand_seed: np.random.Generator | int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Refine bitstrings based on average orbital occupancy and a target hamming weight for a single species.
+
+    This function refines each bit in isolation in an attempt to transform the Hilbert space
+    represented by the input ``bitstring_matrix`` into a space closer to that which supports
+    the ground state.
+
+    Args:
+        bitstring_matrix: A 2D array of ``bool`` representations of bit
+            values such that each row represents a single bitstring
+        probabilities: A 1D array specifying a probability distribution over the bitstrings
+        avg_occupancies: A 1D array holding the mean occupancy each orbital. The occupancies
+            should be formatted as: ``array([occ_0, ..., occ_N])``
+        num_elec: The number of electrons in the system.
+        rand_seed: A seed for controlling randomness
+
+    Returns:
+        A refined bitstring matrix and an updated probability array.
+
+    References:
+        [1]: J. Robledo-Moreno, et al., `Chemistry Beyond Exact Solutions on a Quantum-Centric Supercomputer <https://arxiv.org/abs/2405.05068>`_,
+             arXiv:2405.05068 [quant-ph].
+    """
+    rng = np.random.default_rng(rand_seed)
+
+    if num_elec < 0:
+        raise ValueError("The numbers of electrons must be specified as a non-negative integer.")
+
+    corrected_dict: defaultdict[str, float] = defaultdict(float)
+    occs_array = np.flip(avg_occupancies)
+    for bitstring, freq in zip(bitstring_matrix, probabilities):
+        bs_corrected = _bitstring_correcting(
+            bitstring,
+            occs_array,
+            [num_elec],
             rng=rng,
         )
         bs_str = "".join("1" if bit else "0" for bit in bs_corrected)
@@ -133,20 +184,20 @@ def _p_flip_1_to_0(ratio_exp: float, occ: float, eps: float = 0.01) -> float:  #
     return _p_flip_0_to_1(1 - ratio_exp, 1 - occ, eps)
 
 
-def _bipartite_bitstring_correcting(
+def _bitstring_correcting(
     bit_array: np.ndarray,
     avg_occupancies: np.ndarray,
-    hamming_right: int,
-    hamming_left: int,
+    hamming_weights: Sequence[int],
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Use occupancy information and target hamming weight to correct a bitstring.
+    """Use occupancy information and target hamming weight(s) to correct a bitstring.
 
     Args:
         bit_array: A 1D array of ``bool`` representations of bit values
         avg_occupancies: A 1D array containing the mean occupancy of each orbital.
-        hamming_right: The target hamming weight used for the right half of the bitstring
-        hamming_left: The target hamming weight used for the left half of the bitstring
+        hamming_weights: A 1D array containing the target hamming weight(s). In the
+            case of a 2 particle system, the target hamming weight of the left half
+            of the bitstring comes first.
         rng: A random number generator
 
     Returns:
@@ -156,106 +207,70 @@ def _bipartite_bitstring_correcting(
     # This function must not mutate the input arrays.
     bit_array = bit_array.copy()
 
-    # The number of bits should be even
     num_bits = bit_array.shape[0]
-    partition_size = num_bits // 2
+    num_species = len(hamming_weights)
 
-    # Get the probability of flipping each bit, separated into LEFT and RIGHT subsystems,
-    # based on the avg occupancy of each bit and the target hamming weight
-    probs_left = np.zeros(partition_size)
-    probs_right = np.zeros(partition_size)
-    for i in range(partition_size):
-        if bit_array[i]:
-            probs_left[i] = _p_flip_1_to_0(hamming_left / partition_size, avg_occupancies[i], 0.01)
-        else:
-            probs_left[i] = _p_flip_0_to_1(hamming_left / partition_size, avg_occupancies[i], 0.01)
+    partition_size = num_bits // num_species
 
-        if bit_array[i + partition_size]:
-            probs_right[i] = _p_flip_1_to_0(
-                hamming_right / partition_size, avg_occupancies[i + partition_size], 0.01
-            )
-        else:
-            probs_right[i] = _p_flip_0_to_1(
-                hamming_right / partition_size, avg_occupancies[i + partition_size], 0.01
-            )
-    # Force probabilities to be beween 0 and 1, which can fail due to floating point precision
-    probs_left = np.minimum(1, np.maximum(0, probs_left))
-    probs_right = np.minimum(1, np.maximum(0, probs_right))
+    # Get the probability of flipping each bit based on the avg occupancy of each bit and the target hamming weight
+    probs_table = np.zeros((num_species, partition_size))
+    offset = 0
+    for s in range(num_species):
+        for i in range(partition_size):
+            if bit_array[i + offset]:
+                probs_table[s][i] = _p_flip_1_to_0(
+                    hamming_weights[s] / partition_size, avg_occupancies[i + offset], 0.01
+                )
+            else:
+                probs_table[s][i] = _p_flip_0_to_1(
+                    hamming_weights[s] / partition_size, avg_occupancies[i + offset], 0.01
+                )
 
-    ######################## Handle LEFT bits ########################
-    if np.any(probs_left):
-        # Normalize
-        probs_left /= np.sum(probs_left)
+        # Force probabilities to be beween 0 and 1, which can fail due to floating point precision
+        probs_table[s] = np.minimum(1, np.maximum(0, probs_table[s]))
+        offset += partition_size
 
-        # Get difference between # of 1s and expected # of 1s in LEFT bits
-        n_left = np.sum(bit_array[:partition_size])
-        n_diff = n_left - hamming_left
+    ######################## Handle bits starting with left then right ########################
+    start_idx = 0
+    end_idx = partition_size
+    for s in range(num_species):
+        if np.any(probs_table[s]):
+            # Normalize
+            probs_table[s] /= np.sum(probs_table[s])
 
-        # Too many electrons in LEFT bits
-        if n_diff > 0:
-            indices_occupied = np.where(bit_array[:partition_size])[0]
-            # Get the probabilities that each 1 should be flipped to 0
-            p_choice = probs_left[bit_array[:partition_size]] / np.sum(
-                probs_left[bit_array[:partition_size]]
-            )
-            # Correct the hamming by probabilistically flipping some bits to flip to 0
-            indices_to_flip = rng.choice(
-                indices_occupied, size=round(n_diff), replace=False, p=p_choice
-            )
-            bit_array[:partition_size][indices_to_flip] = False
+            # Get difference between # of 1s and expected # of 1s
+            n = np.sum(bit_array[start_idx:end_idx])
+            n_diff = n - hamming_weights[s]
 
-        # too few electrons in LEFT bits
-        if n_diff < 0:
-            indices_empty = np.where(np.logical_not(bit_array[:partition_size]))[0]
-            # Get the probabilities that each 0 should be flipped to 1
-            p_choice = probs_left[np.logical_not(bit_array[:partition_size])] / np.sum(
-                probs_left[np.logical_not(bit_array[:partition_size])]
-            )
-            # Correct the hamming by probabilistically flipping some bits to flip to 1
-            indices_to_flip = rng.choice(
-                indices_empty, size=round(np.abs(n_diff)), replace=False, p=p_choice
-            )
-            bit_array[:partition_size][indices_to_flip] = np.logical_not(
-                bit_array[:partition_size][indices_to_flip]
-            )
+            # Too many electrons
+            if n_diff > 0:
+                indices_occupied = np.where(bit_array[start_idx:end_idx])[0]
+                # Get the probabilities that each 1 should be flipped to 0
+                p_choice = probs_table[s][bit_array[start_idx:end_idx]] / np.sum(
+                    probs_table[s][bit_array[start_idx:end_idx]]
+                )
+                # Correct the hamming by probabilistically flipping some bits to flip to 0
+                indices_to_flip = rng.choice(
+                    indices_occupied, size=round(n_diff), replace=False, p=p_choice
+                )
+                bit_array[start_idx:end_idx][indices_to_flip] = False
 
-    ######################## Handle RIGHT bits ########################
-    if np.any(probs_right):
-        # Normalize
-        probs_right /= np.sum(probs_right)
+            # too few electrons
+            if n_diff < 0:
+                indices_empty = np.where(np.logical_not(bit_array[start_idx:end_idx]))[0]
+                # Get the probabilities that each 0 should be flipped to 1
+                p_choice = probs_table[s][np.logical_not(bit_array[start_idx:end_idx])] / np.sum(
+                    probs_table[s][np.logical_not(bit_array[start_idx:end_idx])]
+                )
+                # Correct the hamming by probabilistically flipping some bits to flip to 1
+                indices_to_flip = rng.choice(
+                    indices_empty, size=round(np.abs(n_diff)), replace=False, p=p_choice
+                )
+                bit_array[start_idx:end_idx][indices_to_flip] = np.logical_not(
+                    bit_array[start_idx:end_idx][indices_to_flip]
+                )
 
-        # Get difference between # of 1s and expected # of 1s in RIGHT bits
-        n_right = np.sum(bit_array[partition_size:])
-        n_diff = n_right - hamming_right
-
-        # too many electrons in RIGHT bits
-        if n_diff > 0:
-            indices_occupied = np.where(bit_array[partition_size:])[0]
-            # Get the probabilities that each 1 should be flipped to 0
-            p_choice = probs_right[bit_array[partition_size:]] / np.sum(
-                probs_right[bit_array[partition_size:]]
-            )
-            # Correct the hamming by probabilistically flipping some bits to flip to 0
-            indices_to_flip = rng.choice(
-                indices_occupied, size=round(n_diff), replace=False, p=p_choice
-            )
-            bit_array[partition_size:][indices_to_flip] = np.logical_not(
-                bit_array[partition_size:][indices_to_flip]
-            )
-
-        # too few electrons in RIGHT bits
-        if n_diff < 0:
-            indices_empty = np.where(np.logical_not(bit_array[partition_size:]))[0]
-            # Get the probabilities that each 1 should be flipped to 0
-            p_choice = probs_right[np.logical_not(bit_array[partition_size:])] / np.sum(
-                probs_right[np.logical_not(bit_array[partition_size:])]
-            )
-            # Correct the hamming by probabilistically flipping some bits to flip to 1
-            indices_to_flip = rng.choice(
-                indices_empty, size=round(np.abs(n_diff)), replace=False, p=p_choice
-            )
-            bit_array[partition_size:][indices_to_flip] = np.logical_not(
-                bit_array[partition_size:][indices_to_flip]
-            )
+        start_idx += partition_size
+        end_idx += partition_size
 
     return bit_array
