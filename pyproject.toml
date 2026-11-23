@@ -29,7 +29,14 @@ requires-python = ">=3.10"
 dependencies = [
     "qiskit>=2.0, <3",
     "numpy>=2.0",
+<<<<<<< HEAD
     "pyscf>=2.9",
+=======
+    # PySCF 2.15.1 has no macOS arm64 wheel and its sdist fails to build
+    # (https://github.com/pyscf/pyscf/issues/3656)
+    "pyscf>=2.15",
+    "pyscf!=2.15.1; sys_platform == 'darwin'",
+>>>>>>> 16de4e9 (Fix CI by disallowing pyscf 2.15.1 on macOS (#453))
     "jaxlib>=0.4.30",
     "jax>=0.4.30",
     "scipy>=1.14.1",
