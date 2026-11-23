@@ -1,0 +1,4 @@
+---
+other:
+  - |
+    Documented the width of the CI strings that :func:`~qiskit_addon_sqd.fermion.diagonalize_fermionic_hamiltonian` passes to its ``sci_solver``, and the fact that the number of spatial orbitals a workflow supports is set by the solver rather than by this package. :func:`~qiskit_addon_sqd.counts.bitstring_matrix_to_integers` switches to Python integers from 64 bits on, which keeps the conversion exact at any width.
