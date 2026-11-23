@@ -115,16 +115,17 @@ jobs:
       # failing environment's stderr does not survive that replay -- which
       # hides the compiler error when building fulqrum from its sdist fails.
       #
-      # Windows runs the unit tests only. The notebooks need fulqrum and
-      # sbd-eigensolver, which publish no Windows wheels and build only against
-      # the BLAS, OpenMP and MPI installed above for Linux and macOS.
+      # Windows skips the notebooks: they need fulqrum and sbd-eigensolver,
+      # which publish no Windows wheels and build only against the BLAS, OpenMP
+      # and MPI installed above for Linux and macOS.  The engine and purelib
+      # environments do run there, since the binary wheel is built for Windows.
       - name: Test using tox environment
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            tox -e py
+            tox -e py,engine,purelib
           else
-            tox -e py,notebook
+            tox -e py,engine,purelib,notebook
           fi
